@@ -1,0 +1,159 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>LIV - Live Departure Board</title>
+    <style>
+        :root {
+            --bg-deep: #0a0a0c; --text-main: #ffffff; --accent-blue: #00aaff;
+            --station-yellow: #ffee00; --status-green: #00ff88; --status-red: #ff4d4d;
+            --status-orange: #ffa500; --first-class-gold: #d4af37; --std-class-grey: #333;
+        }
+        body { background-color: #000; color: var(--text-main); font-family: 'Segoe UI', sans-serif; margin: 0; padding: 20px; overflow-x: hidden; }
+        .board { max-width: 1100px; margin: auto; background: var(--bg-deep); padding: 25px; border-radius: 12px; border: 1px solid #222; }
+        .header { display: flex; justify-content: space-between; align-items: flex-start; border-bottom: 2px solid #333; padding-bottom: 20px; margin-bottom: 10px; }
+        #station-name { font-size: 2.2rem; font-weight: 800; color: var(--station-yellow); text-transform: uppercase; }
+        .controls { text-align: right; }
+        #clock { font-size: 2rem; font-family: monospace; font-weight: bold; }
+        .sync-info { font-size: 0.75rem; color: #666; margin-top: 5px; text-transform: uppercase; }
+        #status-pill { font-size: 0.8rem; padding: 4px 10px; border-radius: 4px; text-transform: uppercase; display: inline-block; margin-top: 10px; }
+        .status-live { background: #004422; color: var(--status-green); border: 1px solid var(--status-green); }
+        .status-demo { background: #442200; color: var(--status-orange); border: 1px solid var(--status-orange); }
+        .refresh-btn { background: #222; color: #fff; border: 1px solid #444; padding: 6px 12px; border-radius: 4px; cursor: pointer; font-size: 0.8rem; font-weight: bold; }
+        .service-row { display: flex; flex-direction: column; padding: 25px 0; border-bottom: 1px solid #1a1a1a; }
+        .main-line { display: flex; align-items: center; width: 100%; font-size: 1.8rem; font-weight: 600; }
+        .time { width: 110px; }
+        .dest-area { flex-grow: 1; }
+        .plat { width: 70px; text-align: center; background: #222; border-radius: 6px; margin-right: 20px; }
+        .marquee-container { width: 100%; overflow: hidden; white-space: nowrap; margin-top: 12px; padding: 8px 0; }
+        .marquee-text { display: inline-block; padding-left: 100%; animation: scroll-left 30s linear infinite; color: #aaa; font-size: 1.15rem; }
+        @keyframes scroll-left { 0% { transform: translateX(0); } 100% { transform: translateX(-100%); } }
+        .formation-wrapper { margin-top: 20px; }
+        .formation-label { color: #888; font-size: 0.9rem; text-transform: uppercase; font-weight: bold; margin-bottom: 10px; display: block; }
+        .coach-set { display: flex; gap: 8px; }
+        .coach { width: 34px; height: 34px; border-radius: 6px; display: flex; align-items: center; justify-content: center; font-size: 1rem; color: #000; font-weight: 900; }
+        .coach-first { background: var(--first-class-gold); }
+        .coach-std { background: var(--std-class-grey); color: #fff; }
+        .service-footer { margin-top: 20px; color: var(--accent-blue); font-size: 1rem; font-weight: 600; text-transform: uppercase; border-top: 1px solid #1a1a1a; padding-top: 10px; }
+        .on-time { color: var(--status-green); }
+        .delayed { color: var(--status-orange); }
+        #error-display { color: var(--status-orange); font-family: monospace; font-size: 0.8rem; margin-top: 10px; display: none; border: 1px dashed; padding: 10px; }
+    </style>
+</head>
+<body>
+
+<div class="board">
+    <div class="header">
+        <div>
+            <div id="station-name">Liverpool Lime Street</div>
+            <div id="status-pill" class="status-demo">Awaiting Host...</div>
+            <div id="error-display"></div>
+        </div>
+        <div class="controls">
+            <div id="clock">00:00:00</div>
+            <button class="refresh-btn" onclick="fetchData()">REFRESH NOW</button>
+            <div class="sync-info">Last Sync: <span id="sync-time">Never</span></div>
+        </div>
+    </div>
+    <div id="services-list">Loading station data...</div>
+</div>
+
+<script>
+    // UPDATED KEY
+    const TOKEN = 'OY6k1qcYgWZxxesIXJQbIkO2UXyAnVmrVDpkljOBUc0uzCKL';
+    const STATION_CODE = 'LIV';
+
+    async function fetchData() {
+        const btn = document.querySelector('.refresh-btn');
+        const errDisp = document.getElementById('error-display');
+        btn.innerText = "SYNCING...";
+        
+        const url = `https://huxley2.azurewebsites.net/departures/${STATION_CODE}?accessToken=${TOKEN.trim()}&expand=true`;
+        
+        try {
+            const response = await fetch(url);
+            
+            if (response.ok) {
+                const data = await response.json();
+                if (data && data.trainServices) {
+                    updateStatus(true);
+                    renderBoard(data.trainServices);
+                    errDisp.style.display = 'none';
+                    finishSync();
+                    return;
+                }
+            }
+            
+            if (response.status === 500) {
+                errDisp.innerText = "Status 500: Key activating. Please wait up to 60 mins for National Rail to sync.";
+                errDisp.style.display = 'block';
+            } else if (response.status === 401) {
+                errDisp.innerText = "Status 401: Unauthorized. Check if your RDM subscription is 'Active'.";
+                errDisp.style.display = 'block';
+            }
+            throw new Error();
+        } catch (e) {
+            updateStatus(false);
+            renderBoard(getMockData());
+            finishSync();
+        }
+    }
+
+    function finishSync() {
+        document.getElementById('sync-time').innerText = new Date().toLocaleTimeString('en-GB');
+        document.querySelector('.refresh-btn').innerText = "REFRESH NOW";
+    }
+
+    function updateStatus(isLive) {
+        const pill = document.getElementById('status-pill');
+        pill.innerText = isLive ? "Live Network" : "Demo Mode";
+        pill.className = isLive ? "status-live" : "status-demo";
+    }
+
+    function renderBoard(services) {
+        const container = document.getElementById('services-list');
+        container.innerHTML = '';
+        const coachLetters = "ABCDEFGHJKLMNPQRSTUVWXYZ".split("");
+        services.forEach(s => {
+            const row = document.createElement('div');
+            row.className = 'service-row';
+            const destName = s.destination ? s.destination[0].locationName : (s.destinationName || "Unknown");
+            let stops = "Calling at: " + (s.subsequentCallingPoints ? s.subsequentCallingPoints[0].callingPoint.map(cp => `${cp.locationName} (${cp.st})`).join(' • ') : "Information unavailable.");
+            let coachHtml = '';
+            const carCount = s.length || 8;
+            for (let i = 0; i < carCount; i++) {
+                coachHtml += `<div class="coach ${i < 2 ? 'coach-first' : 'coach-std'}">${coachLetters[i] || i+1}</div>`;
+            }
+            row.innerHTML = `
+                <div class="main-line">
+                    <div class="time">${s.std || s.time}</div>
+                    <div class="dest-area">${destName}</div>
+                    <div class="plat">${s.platform || '-'}</div>
+                    <div class="status-text ${s.etd === 'On Time' ? 'on-time' : 'delayed'}">${s.etd || 'On Time'}</div>
+                </div>
+                <div style="padding-left:110px;">
+                    <div class="marquee-container"><div class="marquee-text">${stops}</div></div>
+                    <div class="formation-wrapper">
+                        <span class="formation-label">Train Formation (This train is made of ${carCount} cars)</span>
+                        <div class="coach-set">${coachHtml}</div>
+                    </div>
+                    <div class="service-footer">${s.operator || 'National Rail'}</div>
+                </div>`;
+            container.appendChild(row);
+        });
+    }
+
+    function getMockData() {
+        return [
+            { std: "22:15", destinationName: "London Euston", platform: "7", etd: "On Time", operator: "Avanti West Coast", length: 11 },
+            { std: "22:30", destinationName: "Manchester Oxford Road", platform: "3", etd: "Delayed", operator: "Northern", length: 4 }
+        ];
+    }
+
+    setInterval(fetchData, 60000);
+    setInterval(() => document.getElementById('clock').innerText = new Date().toLocaleTimeString('en-GB'), 1000);
+    fetchData();
+</script>
+</body>
+</html>
